@@ -1,0 +1,177 @@
+[workspace]
+members = [".", "shared"]
+
+[package]
+name = "echidna"
+version = "1.0.0"
+edition = "2021"
+authors = ["researcher"]
+description = "Linux rootkit agent for cybersecurity research"
+license = "MIT"
+repository = "https://github.com/researcher/echidna"
+readme = "README.md"
+keywords = ["rootkit", "research", "security", "mythic", "c2"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "echidna"
+path = "src/lib.rs"
+
+[[bin]]
+name = "echidna"
+path = "src/main.rs"
+
+[dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Time and date handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Random number generation
+rand = "0.8"
+
+# Base64 encoding/decoding
+base64 = "0.21"
+
+# Cryptography
+aes = "0.8"
+block-modes = "0.9"
+hmac = "0.12"
+sha2 = "0.10"
+md5 = "0.7"
+
+# OpenSSL for RSA operations
+openssl = { version = "0.10", features = ["vendored"] }
+
+# HTTP client
+minreq = { version = "2.8", features = ["https"] }
+
+# System interfaces
+libc = "0.2"
+
+# Path manipulation
+path-clean = "1.0"
+
+# Conditional compilation
+cfg-if = "1.0"
+
+# Logging (optional, for debug builds)
+log = { version = "0.4", optional = true }
+env_logger = { version = "0.10", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux-specific dependencies would go here if needed
+
+[features]
+default = []
+
+# Shared library features
+onload = []  # Run on library load
+user = []    # Custom user-defined entrypoint
+
+# Debug features
+debug = ["log", "env_logger"]
+
+# Static linking feature
+static = []
+
+# Rootkit technique features
+lkm = []         # Linux Kernel Module support
+ebpf = []        # eBPF support (future)
+preload = []     # LD_PRELOAD support (future)
+
+[profile.release]
+# Optimize for size and performance
+opt-level = "s"          # Optimize for size
+lto = true               # Link-time optimization
+codegen-units = 1        # Single codegen unit for better optimization
+panic = "abort"          # Abort on panic to reduce binary size
+strip = true             # Strip symbols
+
+[profile.dev]
+# Development profile
+opt-level = 0
+debug = true
+overflow-checks = true
+
+[build-dependencies]
+# Build script dependencies if needed
+
+[dev-dependencies]
+# Test dependencies
+tempfile = "3.8"
+
+# Conditional compilation for different targets
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+# x86_64 specific dependencies
+
+[target.'cfg(target_arch = "x86")'.dependencies]  
+# x86 specific dependencies
+
+# Metadata for cargo
+[package.metadata]
+# Mythic C2 framework integration
+mythic = true
+payload_type = "echidna"
+supported_os = ["Linux"]
+c2_profiles = ["http"]
+
+# Build configuration
+[package.metadata.build]
+static = true
+musl = true
+features = ["lkm"]
+
+# Documentation configuration
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"]
+
+# Security configuration
+[package.metadata.audit]
+# Audit configuration for security scanning
+
+# Binary size optimization
+[package.metadata.bloat]
+# Configuration for cargo-bloat analysis
+
+# Cross-compilation configuration
+[package.metadata.cross]
+# Configuration for cross-compilation
+
+# Environment variables for build
+[env]
+# These will be set by the Mythic builder
+# UUID = { value = "", force = true }
+# callback_host = { value = "127.0.0.1", force = true }
+# callback_port = { value = "80", force = true }
+# callback_interval = { value = "60", force = true }
+# callback_jitter = { value = "10", force = true }
+# killdate = { value = "2024-12-31", force = true }
+# working_hours = { value = "00:00-23:59", force = true }
+# headers = { value = "{}", force = true }
+# post_uri = { value = "/api/v1/agent", force = true }
+# get_uri = { value = "/api/v1/agent", force = true }
+# AESPSK = { value = "{}", force = true }
+# encrypted_exchange_check = { value = "T", force = true }
+
+# Rootkit-specific environment variables
+# preferred_technique = { value = "lkm", force = true }
+# default_stealth_level = { value = "3", force = true }
+# default_anti_detection = { value = "true", force = true }
+# default_persistence = { value = "false", force = true }
+# max_hidden_processes = { value = "100", force = true }
+# max_hidden_files = { value = "1000", force = true }
+# c2_module_endpoint = { value = "/api/v1/modules", force = true }
+
+# Workspace configuration
+[workspace.dependencies]
+# Shared dependencies across workspace members
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+
+[workspace.metadata]
+# Workspace-wide metadata

