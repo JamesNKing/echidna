@@ -211,24 +211,6 @@ impl EchidnaAgent {
             .to_string()
     }
 
-    /// Check for BPF system call support
-    fn check_bpf_support(&self) -> bool {
-        // Try to make a simple BPF syscall to test availability
-        // This is a basic check - full eBPF support would need more validation
-        unsafe {
-            let result = libc::syscall(libc::SYS_bpf, 0, std::ptr::null::<libc::c_void>(), 0);
-            result != -1 || *libc::__errno_location() != libc::ENOSYS
-        }
-    }
-
-    /// Check if kernel version supports eBPF
-    fn check_ebpf_kernel_version(&self) -> bool {
-        // eBPF requires kernel >= 3.18, full features >= 4.1
-        // This is a simplified check
-        let version = self.get_kernel_version();
-        !version.is_empty() && !version.contains("2.") && !version.contains("3.1")
-    }
-
     /// Get glibc version
     fn get_glibc_version(&self) -> String {
         // Try to get glibc version from ldd or other methods

