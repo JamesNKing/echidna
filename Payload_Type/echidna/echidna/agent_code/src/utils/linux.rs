@@ -223,23 +223,6 @@ pub fn get_uptime() -> Option<u64> {
     Some(uptime_float as u64)
 }
 
-/// Get system load averages
-pub fn get_load_average() -> Option<(f64, f64, f64)> {
-    use std::fs;
-    
-    let loadavg_str = fs::read_to_string("/proc/loadavg").ok()?;
-    let parts: Vec<&str> = loadavg_str.split_whitespace().collect();
-    
-    if parts.len() >= 3 {
-        let load1: f64 = parts[0].parse().ok()?;
-        let load5: f64 = parts[1].parse().ok()?;
-        let load15: f64 = parts[2].parse().ok()?;
-        Some((load1, load5, load15))
-    } else {
-        None
-    }
-}
-
 /// Get memory information from /proc/meminfo
 pub fn get_memory_info() -> Option<(u64, u64, u64)> {
     use std::fs;
