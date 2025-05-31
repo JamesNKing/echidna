@@ -4,5 +4,5 @@
   "exclude_documentation_payload": false,
   "exclude_documentation_c2": true,
   "exclude_documentation_wrapper": true,
-  "exclude_agent_icons": false,
+  "exclude_agent_icons": false
 }
