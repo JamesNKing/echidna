@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::error::Error;
 use std::io::prelude::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::result::Result;
 use std::sync::mpsc;
 
@@ -18,7 +18,7 @@ const CHUNK_SIZE: usize = 512000;
 #[derive(Deserialize)]
 struct UploadArgs {
     file: String,
-    path: String,
+    remote_path: String,
 }
 
 /// Upload a file from the host machine to Mythic
@@ -33,8 +33,12 @@ pub fn upload_file(
     let args: UploadArgs = serde_json::from_str(&task.parameters)?;
 
     // Formulate the absolute path for the file upload
-    let cwd = std::env::current_dir()?;
-    let file_path = cwd.join(args.path);
+    let file_path = if args.remote_path.starts_with('/') {
+        PathBuf::from(&args.remote_path)
+    } else {
+        let cwd = std::env::current_dir()?;
+        cwd.join(args.remote_path)
+    };
 
     // Get the full path as a string
     let file_path_str = unverbatim(file_path.clean()).to_string.lossy().to_string();

