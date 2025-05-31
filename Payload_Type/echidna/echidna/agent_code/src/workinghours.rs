@@ -1,8 +1,8 @@
 use crate::agent::{AgentTask, SharedData};
+use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error;
-use chrono::NaiveTime;
 
 /// Arguments for the workinghours command
 #[derive(Deserialize, Serialize)]
@@ -40,7 +40,7 @@ pub fn working_hours(
         Err(_) => {
             return Ok(json!({
                 "task_id": task.id,
-                "status": "error", 
+                "status": "error",
                 "user_output": format!("Invalid end time format: '{}'. Expected HH:MM", args.end),
                 "completed": true,
             }));
@@ -50,7 +50,7 @@ pub fn working_hours(
     // Update the working hours
     let old_start = shared.working_start.format("%H:%M").to_string();
     let old_end = shared.working_end.format("%H:%M").to_string();
-    
+
     shared.working_start = start_time;
     shared.working_end = end_time;
 

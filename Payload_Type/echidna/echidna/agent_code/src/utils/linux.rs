@@ -96,7 +96,7 @@ pub mod whoami {
     /// Grabs the domain name of the system
     pub fn domain() -> Option<String> {
         let mut name: libc::utsname = unsafe { std::mem::zeroed() };
-        
+
         // Get the system domain name if it exists
         if unsafe { libc::uname(&mut name) } != 0 {
             return None;
@@ -217,7 +217,7 @@ pub fn getppid() -> u32 {
 /// Get system uptime in seconds
 pub fn get_uptime() -> Option<u64> {
     use std::fs;
-    
+
     let uptime_str = fs::read_to_string("/proc/uptime").ok()?;
     let uptime_float: f64 = uptime_str.split_whitespace().next()?.parse().ok()?;
     Some(uptime_float as u64)
@@ -226,12 +226,12 @@ pub fn get_uptime() -> Option<u64> {
 /// Get memory information from /proc/meminfo
 pub fn get_memory_info() -> Option<(u64, u64, u64)> {
     use std::fs;
-    
+
     let meminfo = fs::read_to_string("/proc/meminfo").ok()?;
     let mut total = 0u64;
     let mut free = 0u64;
     let mut available = 0u64;
-    
+
     for line in meminfo.lines() {
         if line.starts_with("MemTotal:") {
             total = parse_meminfo_value(line)?;
@@ -241,7 +241,7 @@ pub fn get_memory_info() -> Option<(u64, u64, u64)> {
             available = parse_meminfo_value(line)?;
         }
     }
-    
+
     Some((total, free, available))
 }
 
@@ -258,10 +258,11 @@ fn parse_meminfo_value(line: &str) -> Option<u64> {
 /// Check if a service is running (systemd)
 pub fn is_service_running(service_name: &str) -> bool {
     use std::process::Command;
-    
+
     match Command::new("systemctl")
         .args(&["is-active", "--quiet", service_name])
-        .status() {
+        .status()
+    {
         Ok(status) => status.success(),
         Err(_) => false,
     }
@@ -270,18 +271,19 @@ pub fn is_service_running(service_name: &str) -> bool {
 /// Get list of network interfaces
 pub fn get_network_interfaces() -> Vec<String> {
     use std::fs;
-    
+
     let mut interfaces = Vec::new();
-    
+
     if let Ok(entries) = fs::read_dir("/sys/class/net") {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                if name != "lo" { // Skip loopback
+                if name != "lo" {
+                    // Skip loopback
                     interfaces.push(name.to_string());
                 }
             }
         }
     }
-    
+
     interfaces
 }

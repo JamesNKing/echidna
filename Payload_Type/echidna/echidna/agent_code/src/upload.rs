@@ -40,11 +40,11 @@ pub fn upload_file(
         cwd.join(args.remote_path)
     };
 
-    // Get the full path as a string
-    let file_path_str = unverbatim(file_path.clean()).to_string.lossy().to_string();
+    // Get the full path as a string - fix the .to_string issue
+    let file_path_str = unverbatim(file_path.clean()).to_string_lossy().to_string();
 
     // Check if the file path being uploaded to already exists
-    let file_path = Path::new(&file_path);
+    let file_path = Path::new(&file_path_str);
     if file_path.exists() {
         return Err("Remote path already exists.".into());
     }
