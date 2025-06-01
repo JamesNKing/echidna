@@ -22,7 +22,7 @@ from mythic_container.PayloadBuilder import (
 class Echidna(PayloadType):
     name = "echidna"  # Name of the payload
     file_extension = "exe"  # default file extension to use when creating payloads
-    author = "@researcher"  # authors
+    author = "@viceroy_researcher"  # authors
 
     # Platforms that Echidna supports (Linux only for rootkit functionality)
     supported_os = [
@@ -43,7 +43,7 @@ class Echidna(PayloadType):
             name="daemonize",
             parameter_type=BuildParameterType.Boolean,
             description="Daemonize the process on Linux (fork to background).",
-            default_value=True,
+            default_value=False,
             required=True,
         ),
         # Add a build option which specifies the number of initial checkin attempts
@@ -51,7 +51,7 @@ class Echidna(PayloadType):
             name="connection_retries",
             parameter_type=BuildParameterType.String,
             description="Number of times to try and reconnect if the initial checkin fails.",
-            default_value="3",
+            default_value="1",
             verifier_regex="^[0-9]+$",
             required=True,
         ),
@@ -78,7 +78,7 @@ class Echidna(PayloadType):
             name="static",
             parameter_type=BuildParameterType.Boolean,
             description="Statically link payload. (Only works for 64 bit payloads)",
-            default_value=True,
+            default_value=False,
             required=True,
         ),
         # Output format
@@ -107,88 +107,13 @@ class Echidna(PayloadType):
             default_value="entrypoint",
             required=False,
         ),
-        # Rootkit-specific build parameters
-        BuildParameter(
-            name="default_stealth_level",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Default stealth level for rootkit operations (1=low, 5=maximum)",
-            default_value="3",
-            choices=["1", "2", "3", "4", "5"],
-            required=True,
-        ),
-        BuildParameter(
-            name="preferred_technique",
-            parameter_type=BuildParameterType.ChooseOne,
-            description="Preferred rootkit technique to deploy",
-            default_value="lkm",
-            choices=["lkm", "ebpf", "preload", "auto"],
-            required=True,
-        ),
-        BuildParameter(
-            name="anti_detection",
-            parameter_type=BuildParameterType.Boolean,
-            description="Enable anti-detection measures by default",
-            default_value=True,
-            required=True,
-        ),
-        BuildParameter(
-            name="persistence",
-            parameter_type=BuildParameterType.Boolean,
-            description="Enable persistence mechanisms by default",
-            default_value=False,
-            required=True,
-        ),
-        BuildParameter(
-            name="max_hidden_processes",
-            parameter_type=BuildParameterType.String,
-            description="Maximum number of processes that can be hidden",
-            default_value="100",
-            verifier_regex="^[0-9]+$",
-            required=True,
-        ),
-        BuildParameter(
-            name="max_hidden_files",
-            parameter_type=BuildParameterType.String,
-            description="Maximum number of files/directories that can be hidden",
-            default_value="1000",
-            verifier_regex="^[0-9]+$",
-            required=True,
-        ),
-        BuildParameter(
-            name="bypass_module_signing",
-            parameter_type=BuildParameterType.Boolean,
-            description="Attempt to bypass kernel module signing restrictions",
-            default_value=False,
-            required=True,
-        ),
-        BuildParameter(
-            name="auto_privilege_escalation",
-            parameter_type=BuildParameterType.Boolean,
-            description="Attempt automatic privilege escalation if needed",
-            default_value=False,
-            required=True,
-        ),
-        BuildParameter(
-            name="debug_logging",
-            parameter_type=BuildParameterType.Boolean,
-            description="Enable debug logging for research purposes",
-            default_value=False,
-            required=True,
-        ),
-        BuildParameter(
-            name="wipe_traces_on_exit",
-            parameter_type=BuildParameterType.Boolean,
-            description="Wipe traces and cleanup on agent exit",
-            default_value=True,
-            required=True,
-        ),
     ]
     # Supported C2 profiles for Echidna
     c2_profiles = ["http"]
 
     agent_path = pathlib.Path(".") / "echidna" / "mythic"
     agent_code_path = pathlib.Path(".") / "echidna" / "agent_code"
-    agent_icon_path = agent_path / "agent_icon" / "echidna.svg"
+    # agent_icon_path = agent_path / "agent_icon" / "echidna.svg"
 
     # This function is called to build a new payload
     async def build(self) -> BuildResponse:
@@ -219,9 +144,10 @@ class Echidna(PayloadType):
             rustflags = []
 
             # Check for static linking (Linux only)
-            abi = "musl" if self.get_parameter("static") else "gnu"
+            abi = "gnu"
             if self.get_parameter("static"):
                 rustflags.append("-C target-feature=+crt-static")
+                abi = "musl"
 
             # Fail if trying to build a 32 bit statically linked payload.
             # This is a limitation in musl/openssl since 32 bit integers in musl libc
@@ -240,69 +166,7 @@ class Echidna(PayloadType):
             c2_params["daemonize"] = str(self.get_parameter("daemonize"))
             c2_params["connection_retries"] = self.get_parameter("connection_retries")
             c2_params["working_hours"] = self.get_parameter("working_hours")
-
-            # Rootkit-specific configuration
-            c2_params["default_stealth_level"] = self.get_parameter("default_stealth_level")
-            c2_params["preferred_technique"] = self.get_parameter("preferred_technique")
-            c2_params["default_anti_detection"] = str(self.get_parameter("anti_detection"))
-            c2_params["default_persistence"] = str(self.get_parameter("persistence"))
-            c2_params["max_hidden_processes"] = self.get_parameter("max_hidden_processes")
-            c2_params["max_hidden_files"] = self.get_parameter("max_hidden_files")
-            c2_params["bypass_module_signing"] = str(self.get_parameter("bypass_module_signing"))
-            c2_params["auto_privilege_escalation"] = str(self.get_parameter("auto_privilege_escalation"))
-            c2_params["debug_logging"] = str(self.get_parameter("debug_logging"))
-            c2_params["wipe_traces_on_exit"] = str(self.get_parameter("wipe_traces_on_exit"))
-
-            # Additional rootkit configuration
-            c2_params["c2_module_endpoint"] = "/api/v1/modules"
-            c2_params["temp_module_dir"] = "/tmp"
-            c2_params["max_module_size"] = "10485760"  # 10MB
-            c2_params["module_verification_timeout"] = "300"  # 5 minutes
-            c2_params["kernel_symbols_sample_size"] = "1000"
-            c2_params["verbose_system_assessment"] = "false"
-            c2_params["stealth_exec_timeout"] = "3600"  # 1 hour
-            c2_params["max_memory_usage_mb"] = "512"
-            c2_params["cleanup_interval_minutes"] = "60"
-
-            # Build information
-            c2_params["agent_version"] = "1.0.0"
-            c2_params["build_timestamp"] = str(int(__import__('time').time()))
-            c2_params["target_architecture"] = arch
-            c2_params["static_build"] = str(self.get_parameter("static"))
-            c2_params["compiler_info"] = "rustc"
-            c2_params["compilation_flags"] = " ".join(rustflags) if rustflags else ""
-
-            # Kernel module configuration
-            c2_params["supported_kernel_versions"] = "5.0.0-6.5.0"
-            c2_params["minimum_kernel_version"] = "5.0.0"
-            c2_params["maximum_kernel_version"] = "6.5.0"
-            c2_params["supported_distributions"] = "ubuntu,debian,centos,rhel,fedora"
-            c2_params["kernel_module_compile_params"] = json.dumps({
-                "optimization": "O2",
-                "debug_info": "true" if self.get_parameter("debug_logging") else "false",
-                "warnings": "all"
-            })
-
-            # Security configuration
-            c2_params["attempt_module_signing"] = "false"
-            c2_params["module_signing_cert_path"] = ""
-            c2_params["module_signing_key_path"] = ""
-            c2_params["bypass_secure_boot"] = str(self.get_parameter("bypass_module_signing"))
-            c2_params["secure_boot_bypass_methods"] = "shim_bypass,mokutil_disable"
-
-            # Persistence configuration
-            c2_params["persistence_methods"] = "systemd,cron,init_script"
-            c2_params["self_destruct_conditions"] = "detection,max_time,command"
-
-            # Custom rootkit config
-            c2_params["custom_rootkit_config"] = json.dumps({
-                "aggressive_process_hiding": "false",
-                "recursive_file_hiding": "true",
-                "hide_network_traffic": "true",
-                "log_retention_days": "7",
-                "disable_system_logging": "false"
-            })
-
+           
             # Start formulating the command to build the agent
             command = "env "
 
@@ -312,7 +176,7 @@ class Echidna(PayloadType):
 
             # Set up openssl environment variables
             openssl_env = "OPENSSL_STATIC=yes "
-            if arch == "x86_64":
+            if arch == "x64":
                 openssl_env += "OPENSSL_LIB_DIR=/usr/lib64 "
             else:
                 openssl_env += "OPENSSL_LIB_DIR=/usr/lib "
