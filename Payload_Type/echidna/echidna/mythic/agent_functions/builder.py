@@ -35,7 +35,7 @@ class Echidna(PayloadType):
 
     # Payload does not support dynamic loading
     supports_dynamic_loading = False
-    mythic_encrypts = True
+    mythic_encrypts = False
     build_parameters = [
         # Add a build option which specifies whether the agent should fork in the
         # background on Linux hosts
