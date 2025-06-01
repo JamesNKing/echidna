@@ -23,6 +23,7 @@ rand = "0.8"
 serde_json = "1.0"
 sha2 = "0.9.8"
 netstat2 = "0.11.1"
+libc = "0.2"
 
 [dependencies.minreq]
 version = "2.4.2"
@@ -44,4 +45,3 @@ features = ["vendored-openssl"]
 version = "1.16.1"
 features = ["net", "rt-multi-thread", "io-util", "macros", "process"]
 
-libc = "0.2"
