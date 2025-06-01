@@ -1,0 +1,16 @@
+[package]
+name = "echidna_shared"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "echidna_shared"
+crate-type = ["cdylib"]
+
+[dependencies]
+echidna = { path = ".." }
+ctor = { version = "0.4.2", optional = true }
+
+[features]
+onload = ["dep:ctor"]
+user = []
