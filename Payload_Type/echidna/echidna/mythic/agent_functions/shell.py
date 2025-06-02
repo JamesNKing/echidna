@@ -37,7 +37,7 @@ class ShellCommand(CommandBase):
             Success=True,
             CommandName="shell"
         )
-        taskData.args.add_arg("command", {taskData.args.command_line})
+        taskData.args.add_arg("command", taskData.args.command_line)
         print(response)
         return response
 
