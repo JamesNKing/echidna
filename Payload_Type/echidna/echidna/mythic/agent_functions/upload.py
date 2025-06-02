@@ -94,7 +94,8 @@ class UploadCommand(CommandBase):
                 remote_path = "/" + remote_path
             taskData.args.set_arg("remote_path", remote_path)
         
-        disp_str = "-File {} -Path {}".format(original_file_name, taskData.args.get_arg("remote_path"))
+        #disp_str = "-File {} -Path {}".format(original_file_name, taskData.args.get_arg("remote_path"))
+        disp_str = "-File {} -Path {}".format(original_file_name, remote_path)
 
         response.DisplayParams = disp_str
         return response
