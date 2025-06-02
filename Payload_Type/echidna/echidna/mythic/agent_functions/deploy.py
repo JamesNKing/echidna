@@ -20,7 +20,7 @@ class DeployArguments(TaskArguments):
                 ]
             ),
             CommandParameter(
-                name="path",
+                name="remote_path",
                 type=ParameterType.String,
                 description="Target path where to deploy the kernel module",
                 default_value="/tmp/simple_rootkit.ko",
@@ -40,8 +40,8 @@ class DeployArguments(TaskArguments):
         self.load_args_from_json_string(self.command_line)
         
         # Ensure path has default value if not provided
-        if not self.get_arg("path"):
-            self.add_arg("path", "/tmp/simple_rootkit.ko")
+        if not self.get_arg("remote_path"):
+            self.add_arg("remote_path", "/tmp/simple_rootkit.ko")
 
 
 # Completion callback for upload subtask
@@ -157,7 +157,7 @@ class DeployCommand(CommandBase):
         try:
             # Debug: Show all available arguments
             all_args = {}
-            for arg_name in ["file", "path"]:
+            for arg_name in ["file", "remote_path"]:
                 arg_value = taskData.args.get_arg(arg_name)
                 all_args[arg_name] = arg_value
             
@@ -168,7 +168,7 @@ class DeployCommand(CommandBase):
             
             # Get arguments
             file_uuid = taskData.args.get_arg("file")
-            target_path = taskData.args.get_arg("path")
+            target_path = taskData.args.get_arg("remote_path")
             
             # Apply default if path is None, empty, or just whitespace
             if not target_path or str(target_path).strip() == "":
