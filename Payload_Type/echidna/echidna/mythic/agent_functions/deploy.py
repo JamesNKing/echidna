@@ -120,6 +120,7 @@ class DeployCommand(CommandBase):
         dependencies=["upload", "shell"]
     )
     completion_functions = {"upload_complete": upload_complete}
+    script_only = True
 
     async def create_go_tasking(
             self, taskData: PTTaskMessageAllData
