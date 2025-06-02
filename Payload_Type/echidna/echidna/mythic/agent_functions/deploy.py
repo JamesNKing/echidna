@@ -4,125 +4,6 @@ from mythic_container.MythicRPC import *
 import os
 
 
-class DeployArguments(TaskArguments):
-    def __init__(self, command_line, **kwargs):
-        super().__init__(command_line, **kwargs)
-        self.args = [
-            CommandParameter(
-                name="file",
-                type=ParameterType.File,
-                description="Kernel module (.ko file) to deploy",
-                parameter_group_info=[
-                    ParameterGroupInfo(
-                        required=True,
-                        group_name="Default"
-                    )
-                ]
-            ),
-            CommandParameter(
-                name="path",
-                type=ParameterType.String,
-                description="Target path where to deploy the kernel module",
-                default_value="/tmp/simple_rootkit.ko",
-                parameter_group_info=[
-                    ParameterGroupInfo(
-                        required=False,
-                        group_name="Default"
-                    )
-                ]
-            )
-        ]
-
-    async def parse_arguments(self):
-        if len(self.command_line) == 0:
-            raise ValueError("Must supply arguments")
-        
-        # Parse the file and path arguments
-        self.load_args_from_json_string(self.command_line)
-
-
-class DeployCommand(CommandBase):
-    cmd = "deploy"
-    needs_admin = True
-    help_cmd = "deploy"
-    description = "Deploy a kernel module by uploading and loading it with insmod"
-    version = 1
-    author = ""
-    attackmapping = ["T1547.006"]  # Boot or Logon Autostart Execution: Kernel Modules and Extensions
-    argument_class = DeployArguments
-    browser_script = BrowserScript(script_name="deploy", author="@its_a_feature_")
-    attributes = CommandAttributes(
-        spawn_and_injectable=False,
-        supported_os=[SupportedOS.Linux],
-        builtin=False,
-        load_only=False,
-        suggested_command=False,
-    )
-    completion_functions = {
-        "upload_complete": "handle_upload_completion",
-        "shell_complete": "handle_shell_completion"
-    }
-
-    async def create_go_tasking(self, taskData: PTTaskMessageAllData) -> PTTaskCreateTaskingMessageResponse:
-        response = PTTaskCreateTaskingMessageResponse(
-            TaskID=taskData.Task.ID,
-            Success=True,
-        )
-        
-        # Get the file UUID and target path from arguments
-        file_uuid = taskData.args.get_arg("file")
-        target_path = taskData.args.get_arg("path")
-        
-        # Validate inputs
-        if not file_uuid:
-            response.Success = False
-            response.Error = "No file specified for deployment"
-            return response
-            
-        if not target_path:
-            target_path = "/tmp/simple_rootkit.ko"
-        
-        # Store deployment info for later use in callbacks
-        deploy_info = {
-            "file_uuid": file_uuid,
-            "target_path": target_path,
-            "task_id": taskData.Task.ID
-        }
-        
-        # Create upload subtask first
-        try:
-            upload_subtask = await SendMythicRPCTaskCreateSubtask(MythicRPCTaskCreateSubtaskMessage(
-                TaskID=taskData.Task.ID,
-                CommandName="upload",
-                Params=json.dumps({
-                    "file": file_uuid,
-                    "path": target_path
-                }),
-                SubtaskCallbackFunction="upload_complete",
-                Token=taskData.Task.TokenID
-            ))
-            
-            if not upload_subtask.Success:
-                response.Success = False
-                response.Error = f"Failed to create upload subtask: {upload_subtask.Error}"
-                return response
-                
-            # Store the deploy info in the task's metadata for access in callbacks
-            # We'll use the task's display params to store this temporarily
-            response.DisplayParams = json.dumps(deploy_info)
-            
-        except Exception as e:
-            response.Success = False
-            response.Error = f"Exception creating upload subtask: {str(e)}"
-            return response
-        
-        return response
-
-    async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
-        resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
-        return resp
-
-
 # Completion callback functions
 async def handle_upload_completion(completionMsg: PTTaskCompletionFunctionMessage) -> PTTaskCompletionFunctionMessageResponse:
     """Handle completion of upload subtask"""
@@ -195,3 +76,123 @@ async def handle_shell_completion(completionMsg: PTTaskCompletionFunctionMessage
             response.TaskStatus = "success: Kernel module deployed successfully"
     
     return response
+
+class DeployArguments(TaskArguments):
+    def __init__(self, command_line, **kwargs):
+        super().__init__(command_line, **kwargs)
+        self.args = [
+            CommandParameter(
+                name="file",
+                type=ParameterType.File,
+                description="Kernel module (.ko file) to deploy",
+                parameter_group_info=[
+                    ParameterGroupInfo(
+                        required=True,
+                        group_name="Default"
+                    )
+                ]
+            ),
+            CommandParameter(
+                name="path",
+                type=ParameterType.String,
+                description="Target path where to deploy the kernel module",
+                default_value="/tmp/simple_rootkit.ko",
+                parameter_group_info=[
+                    ParameterGroupInfo(
+                        required=False,
+                        group_name="Default"
+                    )
+                ]
+            )
+        ]
+
+    async def parse_arguments(self):
+        if len(self.command_line) == 0:
+            raise ValueError("Must supply arguments")
+        
+        # Parse the file and path arguments
+        self.load_args_from_json_string(self.command_line)
+
+
+class DeployCommand(CommandBase):
+    cmd = "deploy"
+    needs_admin = True
+    help_cmd = "deploy"
+    description = "Deploy a kernel module by uploading and loading it with insmod"
+    version = 1
+    author = ""
+    attackmapping = ["T1547.006"]  # Boot or Logon Autostart Execution: Kernel Modules and Extensions
+    argument_class = DeployArguments
+    browser_script = BrowserScript(script_name="deploy", author="@its_a_feature_")
+    attributes = CommandAttributes(
+        spawn_and_injectable=False,
+        supported_os=[SupportedOS.Linux],
+        builtin=False,
+        load_only=False,
+        suggested_command=False,
+    )
+    completion_functions = {
+        "upload_complete": handle_upload_completion,
+        "shell_complete": handle_shell_completion
+    }
+
+    async def create_go_tasking(self, taskData: PTTaskMessageAllData) -> PTTaskCreateTaskingMessageResponse:
+        response = PTTaskCreateTaskingMessageResponse(
+            TaskID=taskData.Task.ID,
+            Success=True,
+        )
+        
+        # Get the file UUID and target path from arguments
+        file_uuid = taskData.args.get_arg("file")
+        target_path = taskData.args.get_arg("path")
+        
+        # Validate inputs
+        if not file_uuid:
+            response.Success = False
+            response.Error = "No file specified for deployment"
+            return response
+            
+        if not target_path:
+            target_path = "/tmp/simple_rootkit.ko"
+        
+        # Store deployment info for later use in callbacks
+        deploy_info = {
+            "file_uuid": file_uuid,
+            "target_path": target_path,
+            "task_id": taskData.Task.ID
+        }
+        
+        # Create upload subtask first
+        try:
+            upload_subtask = await SendMythicRPCTaskCreateSubtask(MythicRPCTaskCreateSubtaskMessage(
+                TaskID=taskData.Task.ID,
+                CommandName="upload",
+                Params=json.dumps({
+                    "file": file_uuid,
+                    "path": target_path
+                }),
+                SubtaskCallbackFunction="upload_complete",
+                Token=taskData.Task.TokenID
+            ))
+            
+            if not upload_subtask.Success:
+                response.Success = False
+                response.Error = f"Failed to create upload subtask: {upload_subtask.Error}"
+                return response
+                
+            # Store the deploy info in the task's metadata for access in callbacks
+            # We'll use the task's display params to store this temporarily
+            response.DisplayParams = json.dumps(deploy_info)
+            
+        except Exception as e:
+            response.Success = False
+            response.Error = f"Exception creating upload subtask: {str(e)}"
+            return response
+        
+        return response
+
+    async def process_response(self, task: PTTaskMessageAllData, response: any) -> PTTaskProcessResponseMessageResponse:
+        resp = PTTaskProcessResponseMessageResponse(TaskID=task.Task.ID, Success=True)
+        return resp
+
+
